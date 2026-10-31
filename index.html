@@ -3,16 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#1c1b2e">
+<meta name="theme-color" content="#f5f2ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Sudoku Duel">
+<link rel="apple-touch-icon" href="icon.png">
 <title>Sudoku Duel</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 :root{--p1:#ff6b5a;--p1s:#ffe1dc;--p2:#22b8a7;--p2s:#d3f2ee;--ink:#1f1d36;--muted:#8a87a8;--bg:#f5f2ec;--card:#fff;--line:#d9d4ca;--gold:#ffb703}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-user-select:none;user-select:none;touch-action:manipulation;overflow:hidden}
-#app{height:100%;max-width:480px;margin:0 auto;display:flex;flex-direction:column;align-items:center;padding:10px 10px 14px}
+html,body{margin:0;height:100%;position:fixed;inset:0;width:100%;overscroll-behavior:none;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-user-select:none;user-select:none;touch-action:manipulation;overflow:hidden}
+#app{height:100%;height:100dvh;max-width:480px;margin:0 auto;display:flex;flex-direction:column;align-items:center;padding:10px 10px 14px}
 .screen{display:none;width:100%;height:100%;flex-direction:column;align-items:center}
 .screen.on{display:flex}
+.scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 /* menu */
 .logo{margin-top:6vh;font-weight:900;font-size:42px;letter-spacing:-1px;line-height:1}
 .logo b{color:var(--p1)} .logo i{color:var(--p2);font-style:normal}
@@ -41,7 +47,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
 .pcard.p2{text-align:right}
 .menu-btn{width:42px;border:0;background:var(--card);border-radius:14px;font-size:18px;font-weight:900;color:var(--muted);cursor:pointer}
 .status{height:24px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;margin:6px 0 4px;text-align:center}
-.board{position:relative;margin-top:22px;width:min(94vw,440px,calc(100vh - 330px));aspect-ratio:1;background:var(--ink);border-radius:12px;padding:3px;display:grid;grid-template-columns:repeat(9,1fr);gap:1px}
+.board{position:relative;margin-top:22px;width:min(94vw,440px,calc(100dvh - 300px));aspect-ratio:1;background:var(--ink);border-radius:12px;padding:3px;display:grid;grid-template-columns:repeat(9,1fr);gap:1px}
 .cell{background:var(--card);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:min(6vw,26px);position:relative;cursor:pointer;transition:background .2s}
 .cell.br{margin-right:2px} .cell.bb{margin-bottom:2px}
 .cell.given{color:var(--ink)}
@@ -92,7 +98,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
 <body>
 <div id="app">
   <!-- MENU -->
-  <div class="screen on" id="menu">
+  <div class="screen on scroll" id="menu">
     <div class="logo">Sudoku<br><b>Du</b><i>el</i></div>
     <div class="tag">Same puzzle. Two players.<br>Claim the board before they do.</div>
     <div class="minigrid" id="mini"></div>
@@ -114,7 +120,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
     </div>
   </div>
   <!-- ONLINE -->
-  <div class="screen" id="online">
+  <div class="screen scroll" id="online">
     <div class="logo" style="font-size:34px;margin-top:5vh">Play <b>On</b><i>line</i></div>
     <div class="tag">Both phones open this same link. No accounts needed.<br>One creates a game, the other joins with the code.</div>
     <button class="btn p1" id="bCreate">Create a game</button>
@@ -152,6 +158,9 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family
 </div></div>
 <script>
 "use strict";
+document.addEventListener('touchmove', e => { const sc = e.target.closest && e.target.closest('.scroll'); if (!sc || sc.scrollHeight <= sc.clientHeight) e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+let lastTouchEnd = 0; document.addEventListener('touchend', e => { const n = Date.now(); if (n - lastTouchEnd < 300) e.preventDefault(); lastTouchEnd = n; }, { passive: false });
 const $ = id => document.getElementById(id);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
