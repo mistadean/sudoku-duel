@@ -9,13 +9,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Sudoku Duel">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="manifest" href="manifest.json">
 <title>Sudoku Duel</title>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root{--p1:#ff6b5a;--p1s:#ffe1dc;--p2:#22b8a7;--p2s:#d3f2ee;--ink:#1f1d36;--muted:#8a87a8;--bg:#f5f2ec;--card:#fff;--line:#d9d4ca;--gold:#ffb703}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;position:fixed;inset:0;width:100%;overscroll-behavior:none;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-user-select:none;user-select:none;touch-action:manipulation;overflow:hidden}
-#app{height:100%;height:100dvh;max-width:480px;margin:0 auto;display:flex;flex-direction:column;align-items:center;padding:10px 10px 14px}
+#app{height:100%;height:100dvh;max-width:480px;margin:0 auto;display:flex;flex-direction:column;align-items:center;padding:10px 10px 14px;padding-top:max(10px,env(safe-area-inset-top));padding-bottom:max(14px,env(safe-area-inset-bottom))}
 .screen{display:none;width:100%;height:100%;flex-direction:column;align-items:center}
 .screen.on{display:flex}
 .scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
@@ -273,7 +275,6 @@ function render() {
     if (v) { d.textContent = v; if (star && o !== 'g') d.insertAdjacentHTML('beforeend', '<span class="star">★</span>'); }
     else if (S.notes[i]) { d.innerHTML = '<div class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => '<span>' + (S.notes[i] & (1 << n) ? n : '') + '</span>').join('') + '</div>' + (star ? '<span class="star">★</span>' : ''); }
     else if (star) d.innerHTML = '<span class="star" style="position:static;font-size:min(4.5vw,18px);opacity:.75">★</span>';
-    else if (false) { d.innerHTML = '<div class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => '<span>' + (S.notes[i] & (1 << n) ? n : '') + '</span>').join('') + '</div>'; }
     else d.textContent = '';
   }
   $('board').classList.toggle('wait', !S.over && ((NET && S.turn !== myP()) || (S.vsBot && S.turn === 2)));
@@ -439,34 +440,37 @@ $('bHome').onclick = () => { $('ovEnd').classList.remove('on'); leaveNet(); show
 $('bMenu').onclick = () => { $('ovMenu').classList.add('on'); if (!NET && deadline) { pausedLeft = deadline - Date.now(); deadline = 0; } };
 $('bResume').onclick = () => { $('ovMenu').classList.remove('on'); if (pausedLeft) { deadline = Date.now() + pausedLeft; pausedLeft = 0; } };
 $('bQuit').onclick = () => { $('ovMenu').classList.remove('on'); S.over = true; busy = false; leaveNet(); show('menu'); };
-// ---------- ONLINE (two phones) ----------
-const NO_ROOM = "Couldn't connect. Check both phones are online, then try again.";
-// Direct phone-to-phone link (PeerJS / WebRTC). Same shape as the in-Claude room API.
-function makeLink(code, role) {
+
+// ---------- ONLINE (two phones, via Supabase Realtime broadcast) ----------
+const SB_URL = 'https://bwapjwpxghwavmwlpars.supabase.co';
+const SB_KEY = 'sb_publishable_Spyjf28bY4mndQfGCX72mw_2XC0XMam';
+const NO_ROOM = "Couldn't connect. Check your internet connection and try again.";
+let SB = null;
+function sbClient() {
+  if (SB) return SB;
+  try { if (!window.supabase || !window.supabase.createClient) return null; SB = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: false }, realtime: { params: { eventsPerSecond: 20 } } }); } catch (_) { SB = null; }
+  return SB;
+}
+// Small wrapper giving the same emit / on / presence / leave shape the game uses.
+function joinRoom(code) {
+  const sb = sbClient(); if (!sb) return Promise.resolve(null);
   return new Promise(resolve => {
-    if (!window.Peer) { resolve(null); return; }
-    const id = 'sudokuduel-v1-' + code, handlers = {}, conns = [], queue = [];
-    const opts = Object.assign({ debug: 0 }, window.PEER_OPTS || {});
-    let peer, done = false;
-    const finish = v => { if (!done) { done = true; resolve(v); } };
-    const wire = c => {
-      c.on('data', m => { if (m && handlers[m.t]) handlers[m.t](m.d); });
-      c.on('open', () => { conns.push(c); while (queue.length) c.send(queue.shift()); });
-      c.on('close', () => { const i = conns.indexOf(c); if (i >= 0) conns.splice(i, 1); });
+    const handlers = {};
+    let settled = false;
+    const ch = sb.channel('sudoku-duel-' + code, { config: { broadcast: { self: false, ack: false } } });
+    ch.on('broadcast', { event: '*' }, msg => { const h = handlers[msg.event]; if (h) { try { h(msg.payload); } catch (_) {} } });
+    const room = {
+      emit: (topic, data) => { ch.send({ type: 'broadcast', event: topic, payload: data }); },
+      on: (topic, fn) => { handlers[topic] = fn; },
+      presence: () => {},
+      leave: () => { try { sb.removeChannel(ch); } catch (_) {} }
     };
-    const api = {
-      emit: (t, d) => { const m = { t, d }; const open = conns.filter(c => c.open); if (open.length) open.forEach(c => c.send(m)); else if (role === 'guest') queue.push(m); },
-      on: (t, f) => { handlers[t] = f; },
-      presence() {}, onPeers() {},
-      leave: () => { try { peer.destroy(); } catch (_) {} },
-    };
-    try { peer = role === 'host' ? new Peer(id, opts) : new Peer(opts); } catch (_) { finish(null); return; }
-    peer.on('error', e => { if (e && e.type === 'unavailable-id') finish('taken'); else if (e && e.type === 'peer-unavailable') { if (handlers.__nohost) handlers.__nohost(); } else finish(null); });
-    peer.on('open', () => {
-      if (role === 'host') { peer.on('connection', wire); finish(api); }
-      else { const c = peer.connect(id, { reliable: true }); wire(c); finish(api); }
+    const t = setTimeout(() => { if (!settled) { settled = true; room.leave(); resolve(null); } }, 10000);
+    ch.subscribe(status => {
+      if (settled) return;
+      if (status === 'SUBSCRIBED') { settled = true; clearTimeout(t); resolve(room); }
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') { settled = true; clearTimeout(t); room.leave(); resolve(null); }
     });
-    setTimeout(() => finish(null), 12000);
   });
 }
 const onMsg = t => { $('onMsg').textContent = t || ''; };
@@ -474,14 +478,11 @@ function pack() { return { turnDur, initEmpty: S.initEmpty, stars: S.stars, time
 function broadcast() { if (NET && NET.role === 'host' && R && S) { try { R.emit('state', pack()); } catch (_) {} } }
 setInterval(() => { if (NET && NET.role === 'host' && S && NET.started) broadcast(); }, 2500);
 function leaveNet() { if (R) { try { R.leave(); } catch (_) {} } R = null; NET = null; clearInterval(sendMove.t); }
-async function joinRoom(code, role) { const r = await makeLink(code, role); return r; }
 async function onlineCreate() {
   onMsg('Connecting…'); leaveNet();
-  let code, r;
-  for (let k = 0; k < 4; k++) { code = [...Array(4)].map(() => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join(''); r = await joinRoom(code, 'host'); if (r !== 'taken') break; }
-  if (!r || r === 'taken') { onMsg(NO_ROOM); return; }
+  const code = [...Array(4)].map(() => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+  const r = await joinRoom(code); if (!r) { onMsg(NO_ROOM); return; }
   R = r; NET = { role: 'host', code, started: false };
-  try { R.presence({ role: 'host' }); } catch (_) {}
   R.on('hello', d => {
     if (!NET || NET.role !== 'host') return;
     if (!NET.started || (S && S.over && d && d.rematch)) { NET.started = true; newGame(false); toast('Opponent joined! You go first.', 1500); }
@@ -500,12 +501,11 @@ async function onlineJoin() {
   const code = ($('codeIn').value || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (code.length !== 4) { onMsg('Enter the 4-letter code shown on the other phone.'); return; }
   onMsg('Connecting…'); leaveNet(); $('codeBox').style.display = 'none';
-  const r = await joinRoom(code, 'guest'); if (!r) { onMsg(NO_ROOM); return; }
+  const r = await joinRoom(code); if (!r) { onMsg(NO_ROOM); return; }
   R = r; NET = { role: 'guest', code }; gotFirst = false;
-  R.on('__nohost', () => { if (!gotFirst) onMsg('No game found for ' + code + '. Check the code, and keep the other phone on its waiting screen.'); });
   R.on('state', applyState);
   let tries = 0;
-  const hello = () => { if (!NET || gotFirst) return; if (tries++ > 5) { onMsg('No game found for ' + code + '. Check the code, and keep the other phone on its waiting screen.'); return; } try { R.emit('hello', {}); } catch (_) {} setTimeout(hello, 1500); };
+  const hello = () => { if (!NET || gotFirst) return; if (tries++ > 10) { onMsg('No game found for ' + code + '. Check the code, and keep the other phone on its waiting screen.'); return; } try { R.emit('hello', {}); } catch (_) {} setTimeout(hello, 1500); };
   hello();
 }
 function applyState(d) {
